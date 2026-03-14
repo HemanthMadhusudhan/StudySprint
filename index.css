@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-matte-black: #111111;
+  --color-racing-red: #ff2800;
+  --color-neon-blue: #00d2ff;
+  --color-electric-purple: #b800ff;
+}
+
+body {
+  background-color: var(--color-matte-black);
+  color: #f3f4f6;
+  font-family: 'Rajdhani', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Orbitron', sans-serif;
+}
+
+/* Carbon Fiber Texture Pattern */
+.bg-carbon-fiber {
+  background:
+    radial-gradient(black 15%, transparent 16%) 0 0,
+    radial-gradient(black 15%, transparent 16%) 8px 8px,
+    radial-gradient(rgba(255,255,255,.1) 15%, transparent 20%) 0 1px,
+    radial-gradient(rgba(255,255,255,.1) 15%, transparent 20%) 8px 9px;
+  background-color: #1a1a1a;
+  background-size: 16px 16px;
+}
+
+/* Glassmorphism overrides for dark theme */
+.glass-card {
+  background: rgba(20, 20, 20, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 40, 0, 0.2);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+}
+
+.racing-gradient-text {
+  background: linear-gradient(to right, var(--color-racing-red), var(--color-neon-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--color-racing-red);
+  border-radius: 20px;
+}

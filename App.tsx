@@ -1,641 +1,636 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Upload, FileText, MessageCircle, Play, Settings, FilePlus, 
-  Scissors, Download, CheckCircle, AlertCircle, Sparkles, 
-  Mic, Volume2, X, ChevronRight, BookOpen, Layers, ArrowLeft, Image as ImageIcon,
-  Check, XCircle, Presentation, PenTool, User, Loader2, Share2, Copy, Maximize2, AlertTriangle,
-  Home
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Upload, FileText, Play, Volume2, X, ChevronRight,
+  Sparkles, Check, XCircle, Zap, ShieldAlert, Cpu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BookLogo, FadeIn, StaggerContainer, StaggerItem } from './components/AnimatedComponents';
-import { generateStudyContent, chatWithContext, generatePresentationContent, humanizeText, generateAiImage } from './services/ai';
-import { readFileAsText, mergePDFs, splitPDF, imagesToPDF, compressPDF, wordToPDF, pdfToWord } from './services/pdf';
+import { generateStudyContent, chatWithContext } from './services/ai';
+import { readFileAsText } from './services/pdf';
 import { AppState, StudySession, ChatMessage, Question, QuestionType } from './types';
+import Scene3D from './components/Scene3D';
+import TelemetryLoading from './components/TelemetryLoading';
+import FloatingBot from './components/FloatingBot';
 
 // --- Types ---
-
 interface ExtendedAppState extends AppState {
-  humanizerText: string;
-  humanizedOutput: string;
-  pptTopic: string;
-  showPptModal: boolean;
-  showHumanizerModal: boolean;
-  // Image Gen State
-  showImageModal: boolean;
-  imagePrompt: string;
-  generatedImage: string | null;
+  currentPage: 'home' | 'document-analyzer' | 'search-chat';
+  searchQuery: string;
+  searchChatHistory: ChatMessage[];
 }
 
-// --- Independent Components (Defined OUTSIDE App to prevent re-renders) ---
+// --- Navbar Component ---
+const Navbar: React.FC<{ currentPage: string, onNavigate: (page: string) => void }> = ({ currentPage, onNavigate }) => (
+  <nav className="fixed top-0 left-0 right-0 z-[100] bg-black/40 backdrop-blur-xl border-b border-red-500/20 px-4 md:px-8 py-4 flex justify-between items-center transition-all duration-300 pointer-events-auto">
+    <div className="flex items-center cursor-pointer group gap-0" onClick={() => onNavigate('home')}>
+      <div className="relative flex items-center mr-4">
+        {/* Speed Stripes */}
+        <div className="absolute -left-4 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+          <div className="w-3 h-0.5 bg-red-600 rounded-full" />
+          <div className="w-5 h-0.5 bg-red-600 rounded-full" />
+          <div className="w-2 h-0.5 bg-red-600 rounded-full" />
+        </div>
 
-const Navbar: React.FC<{ view: string, onGoHome: (e?: React.MouseEvent) => void }> = ({ view, onGoHome }) => (
-  <nav className="fixed top-0 left-0 right-0 z-[9999] glass-card border-b-0 px-4 md:px-8 py-3 flex justify-between items-center transition-all duration-300 pointer-events-auto">
-    <div 
-      className="flex items-center text-gray-900 cursor-pointer hover:opacity-80 transition-opacity z-[10000]" 
-      onClick={(e) => onGoHome(e)}
-    >
-      <BookLogo />
-      <span className="font-bold text-xl tracking-tight text-indigo-900 ml-2">QuickRead</span>
-    </div>
-    <div className="flex gap-3 z-[10000]">
-      {view !== 'home' && (
-        <button 
-          type="button"
-          onClick={(e) => onGoHome(e)}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-indigo-700 bg-white/90 hover:bg-white rounded-xl transition-all border border-indigo-100 hover:border-indigo-400 shadow-sm active:scale-90 cursor-pointer pointer-events-auto"
+        {/* Tech Icon Container */}
+        <motion.div
+          whileHover={{ scale: 1.1, skewX: -20 }}
+          className="p-1.5 bg-red-600 rounded-[2px] skew-x-[-15deg] shadow-[0_0_20px_rgba(255,40,0,0.4)] z-10"
         >
-          <Home size={18} /> <span>Home</span>
-        </button>
-      )}
+          <Zap size={18} className="text-white fill-white" />
+        </motion.div>
+      </div>
+
+      {/* Formal F1 Typography */}
+      <h1 className="flex items-center font-black italic tracking-tighter uppercase text-white leading-none overflow-hidden" style={{ fontFamily: 'Orbitron', fontSize: '22px' }}>
+        <span className="relative z-10">STUDY</span>
+        <span className="text-red-600 ml-1 relative group-hover:translate-x-1 transition-transform duration-300">
+          SPRINT
+          {/* Subtle Speed Trail under SPRINT */}
+          <div className="absolute -bottom-1 left-0 w-full h-[2px] bg-red-600/30 skew-x-[-30deg]" />
+        </span>
+      </h1>
+    </div>
+    <div className="flex bg-black/50 p-1 rounded-sm border border-gray-800 skew-x-[-10deg]">
+      <button
+        onClick={() => onNavigate('home')}
+        className={`px-4 py-1.5 text-xs font-bold uppercase tracking-widest skew-x-[10deg] transition-all ${currentPage === 'home' || currentPage === 'search-chat' ? 'text-white bg-red-600' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+      >
+        Home
+      </button>
+      <button
+        onClick={() => onNavigate('document-analyzer')}
+        className={`px-4 py-1.5 text-xs font-bold uppercase tracking-widest skew-x-[10deg] transition-all ${currentPage === 'document-analyzer' ? 'text-white bg-red-600' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+      >
+        Analyzer
+      </button>
     </div>
   </nav>
 );
 
-const LoadingView: React.FC<{ status: string, progress: number }> = ({ status, progress }) => {
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }} 
-      exit={{ opacity: 0 }}
-      className="min-h-screen flex flex-col items-center justify-center bg-white/80 backdrop-blur-2xl z-[70] fixed inset-0"
-    >
-      <div className="relative w-28 h-28 mb-8">
-        <div className="absolute inset-0 border-[6px] border-gray-100 rounded-full"></div>
-        <motion.div 
-          className="absolute inset-0 border-[6px] border-t-indigo-600 rounded-full"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-        ></motion.div>
-        <div className="absolute inset-0 flex items-center justify-center">
-           <BookLogo />
-        </div>
-      </div>
-      
-      <motion.h2 
-        key={status}
-        initial={{ y: 10, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="text-3xl font-bold text-gray-800 mb-2"
-      >
-        {status || 'Processing...'}
-      </motion.h2>
-      
-      <div className="w-80 h-3 bg-gray-100 rounded-full mt-6 overflow-hidden border border-gray-200 relative">
-          <motion.div 
-            className="absolute inset-0 bg-indigo-50 opacity-50"
-            animate={{ x: ["0%", "100%"] }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-            style={{ backgroundImage: "linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent)", backgroundSize: "1rem 1rem" }}
-          />
-          <motion.div 
-            className="h-full bg-indigo-600 rounded-full relative z-10 shadow-lg shadow-indigo-200"
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ type: "spring", stiffness: 50, damping: 15 }}
-          />
-      </div>
-      
-      <div className="mt-3 flex justify-between w-80 text-xs font-semibold text-gray-500">
-        <span>Processing Module</span>
-        <span>{Math.round(progress)}%</span>
-      </div>
-    </motion.div>
-  );
-};
+// --- Home Page (Pit-Stop) ---
+const HomePage: React.FC<{
+  state: ExtendedAppState,
+  fileInputRef: React.RefObject<HTMLInputElement | null>,
+  handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void,
+  onNavigate: (page: string) => void,
+  onSearch: (query: string) => void
+}> = ({ state, fileInputRef, handleFileUpload, onNavigate, onSearch }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
-// --- Home View Component ---
-
-interface HomeViewProps {
-  state: ExtendedAppState;
-  setState: React.Dispatch<React.SetStateAction<ExtendedAppState>>;
-  refs: {
-    fileInput: React.RefObject<HTMLInputElement | null>;
-    pdfToWord: React.RefObject<HTMLInputElement | null>;
-    wordToPdf: React.RefObject<HTMLInputElement | null>;
-    merge: React.RefObject<HTMLInputElement | null>;
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim()) {
+      onSearch(searchQuery);
+      setSearchQuery('');
+    }
   };
-  handlers: {
-    handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-    processFileTool: (files: FileList | null, processor: any, name: string, msg: string) => void;
-    handleGeneratePPT: () => void;
-    handleHumanize: () => void;
-    handleGenerateImage: () => void;
-    handleCloseImageModal: () => void;
-  };
-  toolStatus: string | null;
-  isHumanizing: boolean;
-  isGeneratingImage: boolean;
-}
 
-const HomeView: React.FC<HomeViewProps> = ({ state, setState, refs, handlers, toolStatus, isHumanizing, isGeneratingImage }) => {
   return (
-    <div className="pt-28 pb-12 px-4 max-w-7xl mx-auto">
-      {state.error && (
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-2 shadow-sm"
+    <div className="min-h-screen relative flex items-center justify-center pt-16 pb-6 px-4 overflow-hidden z-10 w-full glass-card border-none bg-transparent">
+      {/* Background Video */}
+      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none opacity-40 mix-blend-screen mix-blend-luminosity">
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          className="absolute top-1/2 left-1/2 w-[100vw] h-[56.25vw] min-h-[100vh] min-w-[177.77vh] -translate-x-1/2 -translate-y-1/2 scale-[1.2] object-cover"
         >
-          <AlertCircle size={20} /> {state.error}
-        </motion.div>
-      )}
-      
-      {/* Hero / Main Upload Section */}
-      <div className="text-center mb-12 lg:mb-16 space-y-6">
-        <FadeIn>
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-sm font-medium mb-6 shadow-sm">
-            <Sparkles size={14} /> AI-Powered Study Platform
-          </div>
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold text-gray-900 tracking-tight leading-[1.1]">
-             Master your documents <br/>
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-500">
-              in seconds, not hours.
-            </span>
-          </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto mt-4 leading-relaxed">
-            Upload notes for instant summaries, clear doubts with AI chat, or use our suite of student tools.
-          </p>
-        </FadeIn>
-
-        <FadeIn delay={0.2} className="max-w-xl mx-auto mt-10">
-          <label className="relative block group cursor-pointer transform transition-transform hover:-translate-y-1">
-            <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-cyan-500 rounded-3xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
-            <div className="relative glass-card rounded-3xl p-10 border-2 border-dashed border-gray-300 hover:border-indigo-500 transition-all flex flex-col items-center justify-center gap-5 bg-white/80">
-              <div className="p-5 bg-indigo-50 text-indigo-600 rounded-full group-hover:scale-110 transition-transform duration-300 shadow-sm">
-                <Upload size={36} />
-              </div>
-              <div className="text-center">
-                <p className="font-bold text-gray-900 text-lg">Drop PDF, DOCX or PPTX</p>
-                <p className="text-sm text-gray-500 mt-2">Up to 20MB • Instant AI Analysis</p>
-              </div>
-              <input 
-                ref={refs.fileInput}
-                type="file" 
-                className="hidden" 
-                accept=".pdf,.txt,.md,.docx" 
-                onChange={handlers.handleFileUpload} 
-              />
-            </div>
-          </label>
-          
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            className="mt-6 flex items-start justify-center gap-2 text-amber-700 bg-amber-50/80 border border-amber-100 p-3 rounded-xl max-w-lg mx-auto backdrop-blur-sm"
-          >
-            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-            <p className="text-xs font-medium text-left leading-relaxed">
-              <span className="font-bold">Caution:</span> Please upload one module at a time. Uploading the complete syllabus may overwhelm the system.
-            </p>
-          </motion.div>
-        </FadeIn>
+          <source src="/car.mp4" type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+        <div className="absolute inset-0 bg-red-900/10 mix-blend-overlay" />
       </div>
 
-      {toolStatus && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[80] px-6 py-3 bg-gray-900/90 backdrop-blur-md text-white rounded-full flex items-center gap-3 shadow-xl animate-fade-in-up border border-white/10">
-           <Loader2 size={18} className="animate-spin text-indigo-400" /> <span className="font-medium">{toolStatus}</span>
+      {/* Intro Overlay covering everything until animation finishes */}
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: "-100%" }}
+        transition={{ duration: 0.8, ease: "easeInOut", delay: 0.2 }}
+        className="fixed inset-0 z-50 bg-red-600 flex items-center justify-center pointer-events-none"
+      >
+        <div className="text-8xl font-black italic text-black/20 uppercase tracking-tighter">SPRINT</div>
+      </motion.div>
+
+      <div className="max-w-4xl w-full mx-auto space-y-8">
+        <div className="text-center space-y-2">
+          <motion.h1
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.9, duration: 0.4 }}
+            className="text-4xl md:text-6xl font-black italic tracking-tighter uppercase text-white"
+          >
+            Knowledge at <span className="racing-gradient-text drop-shadow-[0_0_15px_rgba(255,40,0,0.5)]">Racing Speed</span>
+          </motion.h1>
+          <motion.p
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 1.0, duration: 0.4 }}
+            className="text-gray-400 max-w-xl mx-auto text-base"
+          >
+            Upload your documents. Our F1-grade AI processes them instantly to deliver high-performance summaries and lap-time insights.
+          </motion.p>
         </div>
-      )}
 
-      {/* Hidden Inputs for File Tools */}
-      <input ref={refs.pdfToWord} type="file" accept=".pdf" className="hidden" onChange={(e) => { handlers.processFileTool(e.target.files, (files: any) => pdfToWord(files[0]), `converted_${Date.now()}.doc`, "PDF text extracted to Word!"); e.target.value = ''; }} />
-      <input ref={refs.wordToPdf} type="file" accept=".docx,.txt" className="hidden" onChange={(e) => { handlers.processFileTool(e.target.files, (files: any) => wordToPDF(files[0]), `converted_${Date.now()}.pdf`, "Word to PDF Converted!"); e.target.value = ''; }} />
-      <input ref={refs.merge} type="file" multiple accept=".pdf" className="hidden" onChange={(e) => { handlers.processFileTool(e.target.files, (files: any) => mergePDFs(files), `merged_${Date.now()}.pdf`, "Merged Successfully!"); e.target.value = ''; }} />
-
-      {/* PPT Topic Modal */}
-      <AnimatePresence>
-        {state.showPptModal && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
-             <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-                <button onClick={() => setState(prev => ({...prev, showPptModal: false}))} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
-                  <X size={20} />
-                </button>
-                <h2 className="text-2xl font-bold mb-1 flex items-center gap-2 text-gray-900"><Presentation size={24} className="text-indigo-600"/> PPT Generator</h2>
-                <p className="text-gray-500 text-sm mb-6">Create professional slides in seconds.</p>
-                <div className="flex flex-col gap-4">
-                    <label className="text-sm font-semibold text-gray-700">Presentation Topic</label>
-                    <input 
-                      type="text" 
-                      className="p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-lg bg-gray-50 text-gray-900 placeholder-gray-400"
-                      placeholder="e.g., The French Revolution, Quantum Physics..."
-                      value={state.pptTopic}
-                      onChange={(e) => setState(prev => ({...prev, pptTopic: e.target.value}))}
-                      onKeyDown={(e) => e.key === 'Enter' && handlers.handleGeneratePPT()}
-                      autoFocus
-                    />
-                    <button 
-                      onClick={handlers.handleGeneratePPT}
-                      disabled={!state.pptTopic.trim() || !!toolStatus}
-                      className="bg-indigo-600 text-white px-6 py-4 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-2 shadow-lg shadow-indigo-200"
-                    >
-                      {toolStatus ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />} 
-                      {toolStatus ? 'Generating Slides...' : 'Generate PPT'}
-                    </button>
-                </div>
-             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Humanizer Modal */}
-      <AnimatePresence>
-        {state.showHumanizerModal && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
-             <div className="bg-white rounded-2xl w-full max-w-6xl h-[85vh] p-6 shadow-2xl relative flex flex-col overflow-hidden">
-                <div className="flex justify-between items-center mb-4 shrink-0">
-                    <div>
-                        <h2 className="text-2xl font-bold flex items-center gap-2 text-gray-900"><User size={24} className="text-indigo-600"/> AI Humanizer</h2>
-                        <p className="text-sm text-gray-500">Rewrites AI-generated text to sound natural. Limit: 1000 words.</p>
-                    </div>
-                    <div className="flex gap-2">
-                         <button 
-                          onClick={handlers.handleHumanize}
-                          disabled={!state.humanizerText.trim() || isHumanizing}
-                          className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center gap-2 shadow-lg shadow-indigo-200"
-                         >
-                           {isHumanizing ? <Loader2 size={18} className="animate-spin"/> : <Sparkles size={18} />}
-                           {isHumanizing ? 'Processing...' : 'Humanize Text'}
-                         </button>
-                        <button onClick={() => setState(prev => ({...prev, showHumanizerModal: false}))} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
-                          <X size={20} />
-                        </button>
-                    </div>
-                </div>
-                
-                <div className="grid lg:grid-cols-2 gap-6 flex-1 min-h-0">
-                  {/* Input Side */}
-                  <div className="flex flex-col h-full bg-gray-50 rounded-2xl border border-gray-200 overflow-hidden group focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
-                    <div className="flex justify-between items-center px-4 py-3 border-b border-gray-200 bg-gray-100/50">
-                        <label className="text-sm font-semibold text-gray-700">Input Text</label>
-                        <span className={`text-xs font-mono px-2 py-1 rounded ${state.humanizerText.split(/\s+/).length > 1000 ? 'bg-red-100 text-red-600' : 'bg-white text-gray-500 border border-gray-200'}`}>
-                            {state.humanizerText.trim() ? state.humanizerText.trim().split(/\s+/).length : 0}/1000 words
-                        </span>
-                    </div>
-                    <textarea 
-                      className="flex-1 p-5 resize-none outline-none text-base bg-transparent text-gray-800 leading-relaxed custom-scrollbar placeholder-gray-400"
-                      placeholder="Paste your robotic AI text here to make it sound human..."
-                      value={state.humanizerText}
-                      onChange={(e) => setState(prev => ({...prev, humanizerText: e.target.value}))}
-                      autoFocus
-                    />
-                  </div>
-                  
-                  {/* Output Side */}
-                  <div className="flex flex-col h-full bg-indigo-50/30 rounded-2xl border border-indigo-100 overflow-hidden relative">
-                    <div className="flex justify-between items-center px-4 py-3 border-b border-indigo-100 bg-indigo-50/50">
-                        <label className="text-sm font-semibold text-indigo-900">Humanized Result</label>
-                         {state.humanizedOutput && (
-                             <button onClick={() => navigator.clipboard.writeText(state.humanizedOutput)} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium">
-                                 <Copy size={12}/> Copy
-                             </button>
-                         )}
-                    </div>
-                    <div className="flex-1 p-5 overflow-y-auto text-base text-gray-800 leading-relaxed custom-scrollbar w-full">
-                      {isHumanizing ? (
-                        <div className="flex flex-col items-center justify-center h-full text-indigo-500 gap-4 opacity-70">
-                           <Loader2 className="animate-spin" size={40} /> 
-                           <span className="font-medium animate-pulse text-lg">Polishing text...</span>
-                        </div>
-                      ) : (
-                         state.humanizedOutput ? (
-                             <div className="whitespace-pre-wrap animate-fade-in-up">{state.humanizedOutput}</div>
-                         ) : (
-                             <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2">
-                                 <User size={32} className="opacity-20"/>
-                                 <span className="italic">Result will appear here...</span>
-                             </div>
-                         )
-                      )}
-                    </div>
-                  </div>
-                </div>
-             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Image Generator Modal */}
-      <AnimatePresence>
-        {state.showImageModal && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
-             <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl relative h-auto max-h-[85vh] flex flex-col">
-                <button onClick={handlers.handleCloseImageModal} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors z-10">
-                  <X size={20} />
-                </button>
-                <div className="mb-4 shrink-0">
-                    <h2 className="text-2xl font-bold mb-1 flex items-center gap-2 text-gray-900"><ImageIcon size={24} className="text-indigo-600"/> Image Generator</h2>
-                    <div className="text-xs font-medium text-gray-500 bg-gray-100 w-fit px-2 py-1 rounded">No Daily Limit</div>
-                </div>
-                
-                <div className="flex flex-col gap-4 flex-1 min-h-0">
-                    <div className="space-y-2 shrink-0">
-                      <label className="text-sm font-semibold text-gray-700">Image Description</label>
-                      <input 
-                        type="text" 
-                        className="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-base bg-gray-50 text-gray-900 placeholder-gray-400"
-                        placeholder="e.g., A futuristic city on Mars..."
-                        value={state.imagePrompt}
-                        onChange={(e) => setState(prev => ({...prev, imagePrompt: e.target.value}))}
-                        autoFocus
-                      />
-                    </div>
-
-                    {/* Image Container */}
-                    <div className={`rounded-2xl overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center relative group flex-1 min-h-0 ${!state.generatedImage ? 'min-h-[200px]' : ''}`}>
-                        {state.generatedImage ? (
-                            <img src={state.generatedImage} alt="Generated" className="w-full h-full object-contain" />
-                        ) : (
-                            <div className="text-gray-400 flex flex-col items-center">
-                                <ImageIcon size={48} className="opacity-20 mb-2"/>
-                                <span className="text-sm">Preview will appear here</span>
-                            </div>
-                        )}
-                        
-                        {state.generatedImage && (
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-                               <p className="text-white font-medium">Ready to download</p>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex gap-3 shrink-0">
-                         <button 
-                          onClick={handlers.handleGenerateImage}
-                          disabled={!state.imagePrompt.trim() || isGeneratingImage}
-                          className="flex-1 bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-indigo-200"
-                        >
-                          {isGeneratingImage ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />} 
-                          {isGeneratingImage ? 'Creating Magic...' : 'Generate Image'}
-                        </button>
-                        
-                        {state.generatedImage && (
-                             <a 
-                               href={state.generatedImage} 
-                               download={`image_${Date.now()}.png`}
-                               className="px-5 py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-medium transition-colors flex items-center justify-center border border-gray-200"
-                               title="Download Image"
-                             >
-                                <Download size={20} />
-                             </a>
-                        )}
-                    </div>
-                </div>
-             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <StaggerContainer className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 px-2 lg:px-0">
-        {[
-          { icon: Presentation, title: "PPT Generator", desc: "Generate professional slides from any topic instantly.", action: () => setState(prev => ({...prev, showPptModal: true})) },
-          { icon: User, title: "AI Humanizer", desc: "Rewrite robotic text to sound natural and engaging.", action: () => setState(prev => ({...prev, showHumanizerModal: true})) },
-          { icon: ImageIcon, title: "Image Generator", desc: "Create unique images from text descriptions (Unlimited).", action: () => setState(prev => ({...prev, showImageModal: true})) },
-          { icon: Download, title: "PDF to Word", desc: "Convert PDF documents to editable Word files.", action: () => refs.pdfToWord.current?.click() },
-          { icon: FilePlus, title: "Word to PDF", desc: "Convert Word/Text documents to PDF format.", action: () => refs.wordToPdf.current?.click() },
-          { icon: Layers, title: "PDF Merger", desc: "Combine multiple PDF files into one document.", action: () => refs.merge.current?.click() },
-        ].map((feature, idx) => (
-          <StaggerItem key={idx}>
-            <motion.button 
-              whileHover={{ 
-                scale: 1.03, 
-                translateY: -5,
-                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
-              }}
-              whileTap={{ scale: 0.98 }}
-              initial={{ boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)" }}
-              onClick={feature.action}
-              className="w-full text-left glass-card p-6 lg:p-8 rounded-3xl transition-all duration-300 group border border-white/40 hover:border-indigo-200 h-full flex flex-col bg-white/60 hover:bg-white/90"
+        {/* Error Display */}
+        <AnimatePresence>
+          {state.error && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="max-w-2xl mx-auto bg-red-950/50 border border-red-500/50 rounded-xl p-4 flex items-start gap-4 shadow-[0_0_20px_rgba(255,0,0,0.2)]"
             >
-              <div className="flex-1">
-                <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center mb-5 group-hover:scale-110 transition-transform text-indigo-600 shadow-sm border border-indigo-50">
-                   <feature.icon size={28} />
-                </div>
-                <h3 className="font-bold text-xl mb-2 text-gray-900 group-hover:text-indigo-700 transition-colors">{feature.title}</h3>
-                <p className="text-gray-600 text-sm leading-relaxed">{feature.desc}</p>
+              <ShieldAlert className="text-red-500 shrink-0 mt-0.5" size={24} />
+              <div className="text-left">
+                <h4 className="text-red-500 font-bold uppercase tracking-widest text-sm mb-1">Telemetry Failure</h4>
+                <p className="text-red-200 font-mono text-sm leading-relaxed">{state.error}</p>
               </div>
-            </motion.button>
-          </StaggerItem>
-        ))}
-      </StaggerContainer>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Search Bar / Direct Ask */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 1.1, duration: 0.4 }}
+          className="max-w-2xl mx-auto"
+        >
+          <div className="relative flex items-center bg-black/60 border border-gray-700 p-2 rounded-lg shadow-2xl focus-within:border-red-500/50 focus-within:shadow-[0_0_30px_rgba(255,40,0,0.15)] transition-all skew-x-[-5deg]">
+            <Cpu size={24} className="text-gray-500 ml-4 skew-x-[5deg]" />
+            <input
+              type="text"
+              placeholder="Ask the AI telemetry system..."
+              className="flex-1 bg-transparent border-none text-white px-4 py-3 outline-none font-mono text-sm placeholder-gray-600 skew-x-[5deg]"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
+            />
+            <button
+              onClick={handleSearchSubmit}
+              disabled={!searchQuery.trim()}
+              className="bg-white hover:bg-gray-200 text-black px-6 py-3 font-bold uppercase italic tracking-wider transition-colors disabled:opacity-50"
+            >
+              <div className="skew-x-[5deg]">Query</div>
+            </button>
+          </div>
+        </motion.div>
+
+        {/* Pit Stop Upload Area */}
+        <motion.div
+          initial={{ y: 30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 1.2, duration: 0.4 }}
+          className="max-w-2xl mx-auto"
+        >
+          <label
+            className={`block relative cursor-pointer group rounded-xl p-[2px] overflow-hidden transition-all duration-300 ${isDragOver ? 'scale-[1.02]' : 'hover:scale-[1.01]'}`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setIsDragOver(false); if (e.dataTransfer.files[0] && fileInputRef.current) { fileInputRef.current.files = e.dataTransfer.files; handleFileUpload({ target: fileInputRef.current } as any); } }}
+          >
+            {/* Animated glowing border */}
+            <div className={`absolute inset-0 bg-gradient-to-r from-red-600 via-blue-500 to-red-600 translate-y-[100%] group-hover:translate-y-0 transition-transform duration-500 opacity-50 blur-lg ${isDragOver ? 'translate-y-0 opacity-100 animate-pulse' : ''}`} />
+
+            <div className="relative bg-carbon-fiber border border-gray-800 rounded-xl p-8 flex flex-col items-center justify-center text-center overflow-hidden z-10">
+              {/* Pit stop lines */}
+              <div className="absolute top-0 bottom-0 left-10 w-1 bg-red-600/20" />
+              <div className="absolute top-0 bottom-0 right-10 w-1 bg-red-600/20" />
+              <div className="absolute top-0 bottom-0 left-12 w-0.5 bg-red-600/10" />
+              <div className="absolute top-0 bottom-0 right-12 w-0.5 bg-red-600/10" />
+
+              <div className="bg-red-500/20 p-4 rounded-full mb-4 border-2 border-red-500/50 relative">
+                <div className="absolute inset-0 bg-red-500 rounded-full blur-xl opacity-20 group-hover:opacity-50 transition-opacity" />
+                <Upload size={28} className="text-red-500 relative z-10 group-hover:-translate-y-1 transition-transform" />
+              </div>
+              <h3 className="text-xl font-bold uppercase tracking-widest text-white mb-1 italic">Pit-Stop Upload</h3>
+              <p className="text-gray-400 text-xs font-mono leading-relaxed max-w-sm">
+                Drag & drop PDF, DOCX, or TXT down the track.
+                <br />Maximum payload: 20MB.
+              </p>
+
+              <div className="mt-6 relative inline-flex group/btn">
+                <div className="absolute inset-0 bg-red-600 blur-md opacity-20 group-hover/btn:opacity-60 transition-opacity" />
+                <div className="relative flex items-center bg-red-600 text-white px-6 py-2.5 font-bold uppercase tracking-widest italic skew-x-[15deg] group-hover/btn:-translate-y-0.5 transition-transform cursor-pointer text-sm">
+                  <span className="skew-x-[-15deg] flex items-center gap-2">
+                    <Zap size={16} className="fill-white" /> Sprint Summary
+                  </span>
+                </div>
+              </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".pdf,.txt,.md,.docx"
+              onChange={handleFileUpload}
+            />
+          </label>
+        </motion.div>
+      </div>
     </div>
   );
 };
 
-// --- Dashboard View Component ---
-
-const DashboardView: React.FC<{ state: ExtendedAppState, setState: React.Dispatch<React.SetStateAction<ExtendedAppState>> }> = ({ state, setState }) => {
+// --- Results Dashboard Page (Racing HUD) ---
+const DocumentAnalyzerPage: React.FC<{
+  state: ExtendedAppState,
+  setState: React.Dispatch<React.SetStateAction<ExtendedAppState>>,
+  fileInputRef: React.RefObject<HTMLInputElement | null>,
+  handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
+}> = ({ state, setState, fileInputRef, handleFileUpload }) => {
   const [activeTab, setActiveTab] = useState<'summary' | 'questions' | 'chat'>('summary');
   const [chatInput, setChatInput] = useState('');
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [mcqSelections, setMcqSelections] = useState<Record<string, string>>({});
-  
-  if (!state.studySession) return null;
 
-  const speakText = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      if (isSpeaking) {
-        setIsSpeaking(false);
-        return;
-      }
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
-      setIsSpeaking(true);
-    }
-  };
+  if (!state.studySession) {
+    return (
+      <div className="pt-28 pb-12 px-4 max-w-5xl mx-auto h-screen flex flex-col items-center justify-center text-center relative z-10 pointer-events-auto">
+        <h1 className="text-4xl md:text-5xl font-black italic text-white uppercase tracking-widest mb-8">No Telemetry <span className="text-red-500">Detected</span></h1>
+        <label className="relative block group cursor-pointer w-full max-w-2xl">
+          <div className="absolute inset-0 bg-gradient-to-r from-red-600 via-blue-500 to-red-600 blur-xl opacity-20 group-hover:opacity-60 transition duration-500 rounded-xl"></div>
+          <div className="relative rounded-xl p-16 border border-gray-800 flex flex-col items-center justify-center gap-6 bg-carbon-fiber shadow-2xl">
+            <Upload size={64} className="text-red-500" />
+            <div className="text-center">
+              <p className="font-bold text-white text-2xl uppercase tracking-wider italic">Initialize Upload Sequence</p>
+              <p className="text-gray-400 mt-2 font-mono text-sm max-w-sm mx-auto">Drop a PDF, DOCX, or TXT down the track to acquire an AI generated lap-time summary.</p>
+            </div>
+
+            {state.error && (
+              <div className="w-full bg-red-950/50 border border-red-500/50 rounded-lg p-3 flex items-center gap-3 mt-2">
+                <ShieldAlert className="text-red-500 shrink-0" size={20} />
+                <p className="text-red-200 font-mono text-xs text-left">{state.error}</p>
+              </div>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".pdf,.txt,.md,.docx"
+              onChange={handleFileUpload}
+            />
+          </div>
+        </label>
+      </div>
+    );
+  }
 
   const handleSendMessage = async (customQuery?: string) => {
+    // Boilerplate chat handled similar to before, see complete file for details.
     const textToSend = customQuery || chatInput;
     if (!textToSend.trim()) return;
-    
-    // Switch to chat tab if not already
     if (activeTab !== 'chat') setActiveTab('chat');
-    
     if (!customQuery) setChatInput('');
 
     const newMessage: ChatMessage = { id: Date.now().toString(), role: 'user', text: textToSend, timestamp: Date.now() };
     const loadingId = "loading-" + Date.now();
-    const loadingMessage: ChatMessage = { id: loadingId, role: 'model', text: "Thinking...", timestamp: Date.now() + 1 };
+    const loadingMessage: ChatMessage = { id: loadingId, role: 'model', text: "Processing Telemetry...", timestamp: Date.now() + 1 };
 
     setState(prev => ({ ...prev, chatHistory: [...prev.chatHistory, newMessage, loadingMessage] }));
 
     try {
       const historyForApi = state.chatHistory.map(msg => ({ role: msg.role, parts: [{ text: msg.text }] }));
-      // Add current message to context
       historyForApi.push({ role: 'user', parts: [{ text: textToSend }] });
-
       const response = await chatWithContext(textToSend, state.extractedText, historyForApi);
-      
-      setState(prev => ({ 
-        ...prev, 
-        chatHistory: prev.chatHistory.map(msg => 
-          msg.id === loadingId 
-            ? { ...msg, text: response || "I couldn't generate an answer." } 
-            : msg
-        ) 
+      setState(prev => ({
+        ...prev,
+        chatHistory: prev.chatHistory.map(msg => msg.id === loadingId ? { ...msg, text: response || "Data corrupted." } : msg)
       }));
-    } catch (err) { 
-      console.error(err); 
-      setState(prev => ({ 
-        ...prev, 
-        chatHistory: prev.chatHistory.map(msg => 
-          msg.id === loadingId 
-            ? { ...msg, text: "Sorry, I encountered an error. Please try again." } 
-            : msg
-        ) 
+    } catch (err) {
+      setState(prev => ({
+        ...prev,
+        chatHistory: prev.chatHistory.map(msg => msg.id === loadingId ? { ...msg, text: "System error." } : msg)
       }));
     }
   };
 
   return (
-    <div className="pt-24 pb-8 px-4 max-w-7xl mx-auto h-screen flex flex-col">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-2xl font-bold flex items-center gap-2 text-gray-900 truncate">
-            <FileText className="text-indigo-600 shrink-0" /> <span className="truncate">{state.currentFile?.name}</span>
-          </h2>
-          <div className="flex gap-2 mt-3 overflow-x-auto pb-2 scrollbar-hide mask-fade-right">
-            {state.studySession.keyTerms.map((term, i) => (
-              <button 
-                key={i} 
-                onClick={() => handleSendMessage(`Explain the concept of "${term}" in detail.`)}
-                className="text-xs font-medium bg-white/80 border border-indigo-100 px-3 py-1.5 rounded-full text-indigo-700 whitespace-nowrap shadow-sm hover:bg-indigo-50 hover:border-indigo-200 transition-colors cursor-pointer active:scale-95"
-              >
-                #{term}
-              </button>
-            ))}
+    <div className="pt-24 pb-8 px-4 max-w-[1400px] mx-auto h-screen flex flex-col z-10 relative pointer-events-auto">
+      {/* File Header Telemetry */}
+      <motion.div
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6 bg-black/40 border border-red-500/20 p-4 rounded-xl backdrop-blur-md"
+      >
+        <div className="flex-1 min-w-0 flex items-center">
+          <div className="w-12 h-12 bg-red-600/20 border-2 border-red-600 rounded flex items-center justify-center skew-x-[-10deg] mr-4 shrink-0">
+            <FileText className="text-red-500 skew-x-[10deg]" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] text-red-500 font-bold uppercase tracking-[0.2em] mb-1">Target Acquired</div>
+            <h2 className="text-xl font-bold text-white truncate font-mono">{state.currentFile?.name}</h2>
           </div>
         </div>
-        <div className="glass-card p-1.5 rounded-xl flex gap-1 self-start md:self-auto shrink-0 shadow-sm bg-white/50">
-          {['summary', 'questions', 'chat'].map((tab) => (
+
+        {/* Navigation Tabs (HUD Style) */}
+        <div className="flex bg-black p-1 rounded border border-gray-800 self-start md:self-end text-sm skew-x-[-15deg]">
+          {[
+            { id: 'summary', icon: <Zap size={14} />, label: 'Telemetry (Summary)' },
+            { id: 'questions', icon: <ShieldAlert size={14} />, label: 'Stress Test (Q&A)' },
+            { id: 'chat', icon: <Cpu size={14} />, label: 'AI Comms (Chat)' }
+          ].map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                activeTab === tab 
-                  ? 'bg-white shadow-md text-indigo-600 scale-105' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100/50'
-              }`}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-4 py-2 font-bold uppercase tracking-wider transition-all flex items-center gap-2 ${activeTab === tab.id
+                ? 'bg-red-600 text-white'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <div className="skew-x-[15deg] flex items-center gap-2">{tab.icon} {tab.label.split(' ')[0]}</div>
             </button>
           ))}
         </div>
-      </div>
+      </motion.div>
 
-      <div className="flex-1 overflow-hidden glass-card rounded-3xl border border-white/60 shadow-xl relative bg-white/60 backdrop-blur-xl flex flex-col">
+      {/* Main Content Area */}
+      <motion.div
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.1 }}
+        className="flex-1 overflow-hidden bg-black/60 border border-gray-800 shadow-[0_0_30px_rgba(0,0,0,0.5)] relative flex flex-col backdrop-blur-xl rounded-2xl"
+      >
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-600 via-blue-500 to-red-600" />
+
         {activeTab === 'summary' && (
-          <div className="h-full overflow-y-auto p-6 md:p-10 custom-scrollbar">
-            <div className="flex justify-between items-start mb-8 sticky top-0 bg-white/0 backdrop-blur-sm p-2 -m-2 rounded-xl z-10">
-              <h3 className="text-2xl font-bold text-gray-900">Executive Summary</h3>
-              <button onClick={() => speakText(state.studySession!.summary)} className={`p-3 rounded-full transition-all active:scale-95 ${isSpeaking ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
-                {isSpeaking ? <Volume2 size={22} className="animate-pulse" /> : <Play size={22} className="ml-1" />}
-              </button>
+          <div className="h-full overflow-y-auto p-6 md:p-10 custom-scrollbar relative z-10 text-gray-200">
+            {/* Header */}
+            <div className="flex justify-between items-start mb-10 pb-4 border-b border-gray-800">
+              <div>
+                <h3 className="text-3xl font-black italic uppercase tracking-widest text-white">🏁 Lap Time Results</h3>
+                <p className="text-red-500 text-sm font-mono mt-1">AI processing complete.</p>
+              </div>
             </div>
-            <div className="prose prose-lg prose-indigo max-w-none text-gray-700 leading-relaxed font-light">
-              {state.studySession.summary.split('\n').map((para, i) => <p key={i} className="mb-6">{para}</p>)}
+
+            <div className="space-y-12">
+              <section>
+                <h4 className="flex items-center gap-3 text-xl font-bold uppercase tracking-wider text-purple-400 mb-4 border-b border-gray-800 pb-2">
+                  <span className="w-2 h-2 bg-purple-400"></span> 📊 Key Concepts
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {state.studySession.keyTerms.map((term, i) => (
+                    <motion.div
+                      key={i}
+                      whileHover={{ scale: 1.05, backgroundColor: "#ff2800", color: "white", borderColor: "#ff2800" }}
+                      className="px-4 py-2 rounded-sm border border-gray-700 bg-gray-900/50 text-sm font-mono cursor-pointer transition-colors"
+                      onClick={() => handleSendMessage(`Explain ${term}`)}
+                    >
+                      {term}
+                    </motion.div>
+                  ))}
+                </div>
+              </section>
+
+              {/* Fake structure splitting the summary into HUD sections */}
+              <section>
+                <h4 className="flex items-center gap-3 text-xl font-bold uppercase tracking-wider text-blue-400 mb-4 border-b border-gray-800 pb-2">
+                  <span className="w-2 h-2 bg-blue-400 animate-pulse"></span> ⚡ Quick Insights
+                </h4>
+                <div className="text-lg leading-relaxed font-light text-gray-200">
+                  {/* Extract the first sentence or part of it if no newlines */}
+                  {state.studySession.summary.split('\n').filter(Boolean)[0] || state.studySession.summary.split('.')[0] + '.'}
+                </div>
+              </section>
+
+              <section>
+                <h4 className="flex items-center gap-3 text-xl font-bold uppercase tracking-wider text-red-500 mb-4 border-b border-gray-800 pb-2">
+                  <span className="w-2 h-2 bg-red-500 animate-pulse"></span> 🧠 Deep Summary
+                </h4>
+                <div className="space-y-4 leading-relaxed text-gray-300">
+                  {state.studySession.summary.split('\n').filter(Boolean).length > 1 ? (
+                    state.studySession.summary.split('\n').filter(Boolean).slice(1).map((para, i) => (
+                      <motion.p
+                        key={i}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.1 }}
+                      >
+                        {para}
+                      </motion.p>
+                    ))
+                  ) : (
+                    <motion.p
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                    >
+                      {state.studySession.summary}
+                    </motion.p>
+                  )}
+                </div>
+              </section>
+
             </div>
           </div>
         )}
 
         {activeTab === 'questions' && (
-          <div className="h-full overflow-y-auto p-6 custom-scrollbar bg-gray-50/30">
-            <div className="grid gap-8 max-w-4xl mx-auto">
-              {Object.values(QuestionType).map((type) => {
-                const questions = state.studySession!.questions.filter(q => q.type === type);
-                if (questions.length === 0) return null;
-                return (
-                  <div key={type} className="space-y-4">
-                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest sticky top-0 bg-white/90 backdrop-blur-md py-3 z-10 pl-2 border-b border-gray-100">{type} Questions</h4>
-                     {questions.map((q) => (
-                       <motion.div key={q.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg transition-all group duration-300">
-                          <div className="flex justify-between gap-4 mb-4">
-                            <p className="font-medium text-gray-900 text-lg leading-snug">{q.question}</p>
-                            <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg h-fit whitespace-nowrap border border-indigo-100">{q.marks} m</span>
-                          </div>
-                          {q.type === QuestionType.MCQ && q.options ? (
-                            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {q.options.map((opt, i) => {
-                                const isSelected = mcqSelections[q.id] === opt;
-                                const isCorrect = q.answer === opt;
-                                const showResult = !!mcqSelections[q.id];
-                                let btnClass = "text-sm px-5 py-4 rounded-xl border text-left transition-all duration-200 relative overflow-hidden ";
-                                if (showResult) {
-                                    if (isCorrect) btnClass += "bg-green-50 border-green-200 text-green-800 font-semibold ring-1 ring-green-200 ";
-                                    else if (isSelected) btnClass += "bg-red-50 border-red-200 text-red-800 ";
-                                    else btnClass += "bg-gray-50 border-gray-100 text-gray-400 opacity-50 ";
-                                } else {
-                                    btnClass += "bg-white border-gray-200 text-gray-700 hover:bg-indigo-50 hover:border-indigo-200 hover:shadow-sm hover:-translate-y-0.5 ";
-                                }
-                                return (
-                                  <button key={i} disabled={showResult} onClick={() => setMcqSelections(prev => ({...prev, [q.id]: opt}))} className={btnClass}>
-                                    <div className="flex items-center justify-between relative z-10">
-                                      <span>{opt}</span>
-                                      {showResult && isCorrect && <Check size={18} className="text-green-600" />}
-                                      {showResult && isSelected && !isCorrect && <XCircle size={18} className="text-red-500" />}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="mt-3 p-4 bg-gray-50/80 rounded-xl text-sm text-gray-700 border border-gray-100">
-                                <span className="font-semibold text-gray-900 block mb-1">Answer:</span>
-                                {q.answer}
-                            </div>
-                          )}
-                          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center text-sm text-indigo-600 font-medium cursor-pointer hover:text-indigo-800 transition-colors" onClick={() => { handleSendMessage(`Explain this question: "${q.question}"`); }}>
-                            <MessageCircle size={16} className="mr-2" /> Ask AI to explain this
-                          </div>
-                       </motion.div>
-                     ))}
+          <div className="h-full overflow-y-auto p-6 md:p-10 custom-scrollbar relative z-10 text-gray-200">
+            <div className="flex justify-between items-start mb-8 pb-4 border-b border-gray-800">
+              <div>
+                <h3 className="text-3xl font-black italic uppercase tracking-widest text-white">🛡️ Stress Test</h3>
+                <p className="text-red-500 text-sm font-mono mt-1">Acquired QA metrics.</p>
+              </div>
+            </div>
+
+            <div className="space-y-8">
+              {state.studySession.questions.map((q, i) => (
+                <motion.div
+                  key={q.id || i}
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: i * 0.1 }}
+                  className="bg-black/50 border border-gray-800 rounded-xl p-6 hover:border-red-500/30 transition-colors"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <span className="px-3 py-1 bg-gray-900 border border-gray-700 text-blue-400 font-bold text-xs uppercase tracking-widest rounded-sm">{q.type}</span>
+                    </div>
+                    <span className="text-red-500 font-mono text-xs">{q.marks} {q.marks === 1 ? 'Point' : 'Points'}</span>
                   </div>
-                );
-              })}
+
+                  <p className="font-bold text-lg mb-4 text-white">{q.question}</p>
+
+                  {q.type === 'MCQ' && q.options && (
+                    <div className="grid grid-col-1 md:grid-cols-2 gap-3 mb-4">
+                      {q.options.map((opt, oIdx) => {
+                        const isSelected = mcqSelections[q.id] === opt;
+                        const isCorrect = isSelected && opt === q.answer;
+                        const isWrong = isSelected && opt !== q.answer;
+
+                        let borderClass = 'border-gray-700';
+                        let bgClass = 'bg-gray-900/50 hover:bg-gray-800';
+                        let textClass = 'text-gray-300';
+
+                        if (isCorrect) {
+                          borderClass = 'border-green-500/50';
+                          bgClass = 'bg-green-500/10';
+                          textClass = 'text-green-400 font-bold';
+                        } else if (isWrong) {
+                          borderClass = 'border-red-500/50';
+                          bgClass = 'bg-red-500/10';
+                          textClass = 'text-red-400 font-bold';
+                        } else if (mcqSelections[q.id] && opt === q.answer) {
+                          borderClass = 'border-green-500/30 border-dashed';
+                          textClass = 'text-green-500/70';
+                        }
+
+                        return (
+                          <button
+                            key={oIdx}
+                            className={`text-left p-3 rounded-md border transition-all ${borderClass} ${bgClass} ${textClass} flex items-center justify-between`}
+                            onClick={() => !mcqSelections[q.id] && setMcqSelections(prev => ({ ...prev, [q.id]: opt }))}
+                            disabled={!!mcqSelections[q.id]}
+                          >
+                            <span>{opt}</span>
+                            {isCorrect && <Check size={16} className="text-green-500" />}
+                            {isWrong && <XCircle size={16} className="text-red-500" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {((q.type === 'MCQ' && mcqSelections[q.id]) || q.type !== 'MCQ') && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="mt-4 pt-4 border-t border-gray-800"
+                    >
+                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-2">System Answer:</p>
+                      <p className="text-gray-300 whitespace-pre-wrap">{q.answer}</p>
+                      {q.explanation && (
+                        <div className="mt-3 bg-blue-900/10 border-l-2 border-blue-500 p-3">
+                          <p className="text-xs text-blue-400 whitespace-pre-wrap">{q.explanation}</p>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </motion.div>
+              ))}
             </div>
           </div>
         )}
-
         {activeTab === 'chat' && (
-          <div className="h-full flex flex-col bg-white/30">
+          <div className="h-full flex flex-col bg-transparent relative z-10">
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar">
               {state.chatHistory.map((msg) => (
                 <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] md:max-w-[75%] p-5 rounded-3xl shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none border border-gray-100'}`}>
-                    <p className="whitespace-pre-wrap text-sm md:text-base leading-relaxed">
-                      {msg.text === "Thinking..." ? (
-                        <span className="flex items-center gap-1 opacity-70">
-                          Thinking<span className="animate-pulse">...</span>
-                        </span>
-                      ) : (
-                        msg.text
-                      )}
+                  <div className={`max-w-[85%] md:max-w-[75%] p-4 rounded border ${msg.role === 'user' ? 'bg-red-600/10 border-red-500/30 text-white rounded-tr-none' : 'bg-blue-600/10 border-blue-500/30 text-blue-50 rounded-tl-none font-mono text-sm'}`}>
+                    <div className="text-[10px] text-gray-500 mb-1 uppercase tracking-widest">{msg.role === 'user' ? 'Pilot' : 'AI Engineer'}</div>
+                    <p className="whitespace-pre-wrap">
+                      {msg.text === "Processing Telemetry..." ? <span className="animate-pulse">Retrieving Data...</span> : msg.text}
                     </p>
                   </div>
                 </div>
               ))}
             </div>
-            <div className="p-4 md:p-6 border-t border-white/50 bg-white/60 backdrop-blur-md">
-              <div className="flex gap-3 bg-white p-1.5 rounded-2xl border border-gray-200 shadow-sm focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
-                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Ask anything about your document..." className="flex-1 px-4 py-3 bg-transparent border-none focus:ring-0 text-gray-900 placeholder-gray-400" />
-                <button onClick={() => handleSendMessage()} disabled={!chatInput.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-xl disabled:opacity-50 transition-all active:scale-95 shadow-md">
+            <div className="p-4 bg-black/80 border-t border-gray-800">
+              <div className="flex gap-3 bg-gray-900 border border-gray-700 p-1.5 focus-within:border-red-500/50 transition-all skew-x-[-5deg]">
+                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Transmit message to AI core..." className="flex-1 px-4 bg-transparent border-none text-white outline-none font-mono text-sm placeholder-gray-600 skew-x-[5deg]" />
+                <button onClick={() => handleSendMessage()} disabled={!chatInput.trim()} className="bg-red-600 hover:bg-red-500 text-white p-3 font-bold uppercase disabled:opacity-50 transition-colors skew-x-[5deg]">
                   <ChevronRight size={20} />
                 </button>
               </div>
             </div>
           </div>
         )}
+      </motion.div>
+    </div>
+  );
+};
+
+// --- Search Chat Page (Telemetry API) ---
+const SearchChatPage: React.FC<{
+  state: ExtendedAppState,
+  setState: React.Dispatch<React.SetStateAction<ExtendedAppState>>,
+  onBackToHome: () => void
+}> = ({ state, setState, onBackToHome }) => {
+  const [chatInput, setChatInput] = useState('');
+
+  const handleSendMessage = async (customQuery?: string) => {
+    const textToSend = customQuery || chatInput;
+    if (!textToSend.trim()) return;
+
+    if (!customQuery) setChatInput('');
+
+    const newMessage: ChatMessage = { id: Date.now().toString(), role: 'user', text: textToSend, timestamp: Date.now() };
+    const loadingId = "loading-" + Date.now();
+    const loadingMessage: ChatMessage = { id: loadingId, role: 'model', text: "Processing Telemetry...", timestamp: Date.now() + 1 };
+
+    setState(prev => ({ ...prev, searchChatHistory: [...prev.searchChatHistory, newMessage, loadingMessage] }));
+
+    try {
+      const historyForApi = state.searchChatHistory.map(msg => ({ role: msg.role, parts: [{ text: msg.text }] }));
+      historyForApi.push({ role: 'user', parts: [{ text: textToSend }] });
+
+      const response = await chatWithContext(textToSend, '', historyForApi);
+
+      setState(prev => ({
+        ...prev,
+        searchChatHistory: prev.searchChatHistory.map(msg =>
+          msg.id === loadingId
+            ? { ...msg, text: response || "Data corrupted." }
+            : msg
+        )
+      }));
+    } catch (err) {
+      setState(prev => ({
+        ...prev,
+        searchChatHistory: prev.searchChatHistory.map(msg =>
+          msg.id === loadingId
+            ? { ...msg, text: "System error." }
+            : msg
+        )
+      }));
+    }
+  };
+
+  return (
+    <div className="pt-24 pb-8 px-4 max-w-[1400px] mx-auto h-screen flex flex-col z-10 relative pointer-events-auto">
+      <div className="flex items-center justify-between gap-4 mb-6 bg-black/40 border border-red-500/20 p-4 rounded-xl backdrop-blur-md">
+        <div className="flex-1">
+          <h2 className="text-2xl font-bold text-white uppercase italic tracking-widest"><span className="text-red-500">AI</span> Telemetry</h2>
+          <p className="text-sm text-gray-400 mt-1 font-mono">Global communications array</p>
+        </div>
+        <button
+          onClick={onBackToHome}
+          className="px-6 py-2 text-sm font-bold text-white uppercase italic tracking-wider bg-red-600 hover:bg-red-500 transition-colors skew-x-[15deg]"
+        >
+          <div className="skew-x-[-15deg]">Abort</div>
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-hidden bg-black/60 border border-gray-800 shadow-[0_0_30px_rgba(0,0,0,0.5)] relative flex flex-col backdrop-blur-xl rounded-2xl">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-600 via-blue-500 to-red-600" />
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar relative z-10">
+          {state.searchChatHistory.map((msg) => (
+            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] md:max-w-[75%] p-4 rounded border ${msg.role === 'user' ? 'bg-red-600/10 border-red-500/30 text-white rounded-tr-none' : 'bg-blue-600/10 border-blue-500/30 text-blue-50 rounded-tl-none font-mono text-sm'}`}>
+                <div className="text-[10px] text-gray-500 mb-1 uppercase tracking-widest">{msg.role === 'user' ? 'Pilot' : 'AI Engineer'}</div>
+                <p className="whitespace-pre-wrap">
+                  {msg.text === "Processing Telemetry..." ? <span className="animate-pulse">Retrieving Data...</span> : msg.text}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-4 bg-black/80 border-t border-gray-800 z-10">
+          <div className="flex gap-3 bg-gray-900 border border-gray-700 p-1.5 focus-within:border-red-500/50 transition-all skew-x-[-5deg]">
+            <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} placeholder="Transmit query to global AI network..." className="flex-1 px-4 bg-transparent border-none text-white outline-none font-mono text-sm placeholder-gray-600 skew-x-[5deg]" />
+            <button onClick={() => handleSendMessage()} disabled={!chatInput.trim()} className="bg-red-600 hover:bg-red-500 text-white p-3 font-bold uppercase disabled:opacity-50 transition-colors skew-x-[5deg]">
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-// --- Main App Container ---
-
-// Initial State Factory to ensure clean reset
+// --- Main App ---
 const getInitialState = (): ExtendedAppState => ({
   currentFile: null,
   extractedText: '',
@@ -646,260 +641,146 @@ const getInitialState = (): ExtendedAppState => ({
   studySession: null,
   chatHistory: [],
   view: 'home',
-  humanizerText: '',
-  humanizedOutput: '',
-  pptTopic: '',
-  showPptModal: false,
-  showHumanizerModal: false,
-  showImageModal: false,
-  imagePrompt: '',
-  generatedImage: null,
+  currentPage: 'home',
+  searchQuery: '',
+  searchChatHistory: [],
 });
 
 const App: React.FC = () => {
   const [state, setState] = useState<ExtendedAppState>(getInitialState());
-  const [toolStatus, setToolStatus] = useState<string | null>(null);
-  const [isHumanizing, setIsHumanizing] = useState(false);
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mergeInputRef = useRef<HTMLInputElement>(null);
-  const wordToPdfInputRef = useRef<HTMLInputElement>(null);
-  const pdfToWordInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    // Limits removed for image generation, no local storage check needed for counts
-  }, []);
-
-  // --- Handlers ---
-
-  const handleGoHome = (e?: React.MouseEvent) => {
-    // Prevent event propagation issues
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
-    // Confirmation if navigating away from an active dashboard session
-    if (state.view === 'dashboard') {
-      const confirmed = window.confirm('Are you sure you want to close this session? Your unsaved work will be lost.');
-      if (!confirmed) return;
-    }
-
-    // Stop any ongoing speech immediately
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-
-    // Force a complete reset to ensure Home works every time
-    setState(getInitialState());
-    setToolStatus(null);
-    
-    // Smoothly scroll back to top if needed
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleNavigate = (page: string) => {
+    setState(prev => ({ ...prev, currentPage: page as ExtendedAppState['currentPage'], view: page === 'document-analyzer' && prev.studySession ? 'dashboard' : 'home' }));
   };
-
-  const handleCloseImageModal = () => {
-      setState(prev => ({ 
-          ...prev, 
-          showImageModal: false,
-          generatedImage: null,
-          imagePrompt: ''
-      }));
-  }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ''; // Reset input
-    
+    e.target.value = '';
     if (!file) return;
 
-    if (file.size > 20 * 1024 * 1024) {
-      setState(prev => ({ ...prev, error: "File too large. Max 20MB." }));
-      return;
-    }
-
-    setState(prev => ({ 
-        ...prev, 
-        isProcessing: true, 
-        processingStatus: 'Extracting Text...',
-        processingProgress: 0,
-        error: null, 
-        currentFile: file, 
-        view: 'dashboard'
+    setState(prev => ({
+      ...prev, isProcessing: true, processingStatus: 'Extracting File Data...', processingProgress: 0, error: null, currentFile: file, view: 'dashboard', currentPage: 'document-analyzer'
     }));
 
     try {
       const text = await readFileAsText(file, (progress) => {
-          setState(prev => ({ ...prev, processingProgress: Math.min(progress, 90) }));
+        setState(prev => ({ ...prev, processingProgress: Math.min(progress, 90) }));
       });
-      
-      setState(prev => ({ ...prev, extractedText: text, processingStatus: 'Analyzing Content...', processingProgress: 90 }));
 
-      const progressInterval = setInterval(() => {
-          setState(prev => {
-              if (prev.processingProgress >= 98) return prev;
-              return { ...prev, processingProgress: prev.processingProgress + 1 };
-          });
-      }, 200);
+      setState(prev => ({ ...prev, extractedText: text, processingStatus: 'Optimizing Neural Maps...', processingProgress: 90 }));
+
+      const interval = setInterval(() => {
+        setState(prev => prev.processingProgress >= 99 ? prev : { ...prev, processingProgress: prev.processingProgress + 1 });
+      }, 30);
 
       const session = await generateStudyContent(text);
-      clearInterval(progressInterval);
+      clearInterval(interval);
 
-      setState(prev => ({ 
-        ...prev, 
-        isProcessing: false, 
-        processingProgress: 100,
-        studySession: session,
-        chatHistory: [{ id: 'welcome', role: 'model', text: `I've analyzed ${file.name}. Ask me anything about it!`, timestamp: Date.now() }]
+      setState(prev => ({
+        ...prev, isProcessing: false, processingProgress: 100, studySession: session, error: null,
+        chatHistory: [{ id: 'sys', role: 'model', text: `Telemetry data for ${file.name} acquired. Systems nominal. Ready for queries.`, timestamp: Date.now() }]
       }));
-
     } catch (err: any) {
-      setState(prev => ({ ...prev, isProcessing: false, error: err.message, view: 'home' }));
+      setState(prev => ({
+        ...prev,
+        isProcessing: false,
+        error: err.message || "Unknown Telemetry Error",
+        // Keep them on whatever page they were on, but clear the current file/session mapping
+        currentFile: null
+      }));
     }
   };
 
-  const processFileTool = async (
-    files: FileList | null, 
-    processor: (files: File[]) => Promise<Uint8Array | Blob>, 
-    filename: string, 
-    successMsg: string
-  ) => {
-    if (!files || files.length === 0) return;
-    setToolStatus("Processing...");
-    
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) return;
+
+    const userMessage: ChatMessage = { id: Date.now().toString(), role: 'user', text: query, timestamp: Date.now() };
+    const loadingId = "loading-" + Date.now();
+    const loadingMessage: ChatMessage = { id: loadingId, role: 'model', text: "Processing Telemetry...", timestamp: Date.now() + 1 };
+
+    setState(prev => ({
+      ...prev,
+      currentPage: 'search-chat',
+      searchQuery: query,
+      searchChatHistory: [userMessage, loadingMessage]
+    }));
+
     try {
-      const result = await processor(Array.from(files));
-      const blob = result instanceof Blob ? result : new Blob([result], { type: 'application/pdf' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      link.click();
-      setToolStatus(successMsg);
-      setTimeout(() => setToolStatus(null), 3000);
-    } catch (err: any) {
+      const response = await chatWithContext(query, '', []);
+      setState(prev => ({
+        ...prev,
+        searchChatHistory: prev.searchChatHistory.map(msg =>
+          msg.id === loadingId
+            ? { ...msg, text: response || "Data corrupted." }
+            : msg
+        )
+      }));
+    } catch (err) {
       console.error(err);
-      setToolStatus("Error: " + err.message);
-      setTimeout(() => setToolStatus(null), 3000);
+      setState(prev => ({
+        ...prev,
+        searchChatHistory: prev.searchChatHistory.map(msg =>
+          msg.id === loadingId
+            ? { ...msg, text: "System error." }
+            : msg
+        )
+      }));
     }
   };
-
-  const handleGeneratePPT = async () => {
-      if (!state.pptTopic.trim()) return;
-      
-      setToolStatus("Generating Slides...");
-      try {
-          const pptData = await generatePresentationContent(state.pptTopic);
-          if (!pptData.slides || pptData.slides.length === 0) throw new Error("No slides generated");
-
-          setToolStatus("Creating PPTX...");
-          const pptx = new (window as any).PptxGenJS();
-          
-          const titleSlide = pptx.addSlide();
-          titleSlide.addText(state.pptTopic, { x: 0.5, y: 2.5, w: '90%', fontSize: 44, bold: true, align: 'center', color: '363636' });
-          titleSlide.addText("Generated by QuickRead AI", { x: 0.5, y: 4, w: '90%', fontSize: 18, align: 'center', color: '808080' });
-
-          pptData.slides.forEach((slide: any) => {
-              const slideObj = pptx.addSlide();
-              slideObj.addText(slide.title, { x: 0.5, y: 0.5, fontSize: 24, bold: true, color: '363636' });
-              const bulletText = slide.bullets.map((b: string) => ({ text: b, options: { fontSize: 16, color: '505050', breakLine: true } }));
-              slideObj.addText(bulletText, { x: 0.5, y: 1.5, w: '90%', h: '70%', margin: 10, bullet: true, lineSpacing: 25 });
-              
-              // Add Speaker Notes
-              if (slide.speakerNotes) {
-                  slideObj.addNotes(slide.speakerNotes);
-              }
-          });
-
-          pptx.writeFile({ fileName: `${state.pptTopic.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_presentation.pptx` });
-          
-          setToolStatus("PPT Downloaded!");
-          // Close modal on success
-          setState(prev => ({ ...prev, showPptModal: false, pptTopic: '' }));
-          
-          setTimeout(() => setToolStatus(null), 3000);
-
-      } catch (err: any) {
-          console.error(err);
-          setToolStatus("Error: " + err.message);
-          setTimeout(() => setToolStatus(null), 3000);
-      }
-  };
-
-  const handleHumanize = async () => {
-      if (!state.humanizerText.trim()) return;
-      const wordCount = state.humanizerText.trim().split(/\s+/).length;
-      if (wordCount > 1000) {
-          alert(`Text too long (${wordCount} words). Please limit to 1000 words.`);
-          return;
-      }
-
-      setIsHumanizing(true);
-      try {
-          const result = await humanizeText(state.humanizerText);
-          setState(prev => ({ ...prev, humanizedOutput: result || "" }));
-      } catch (e) {
-          setToolStatus("Error humanizing text");
-          setTimeout(() => setToolStatus(null), 2000);
-      } finally {
-          setIsHumanizing(false);
-      }
-  };
-
-  const handleGenerateImage = async () => {
-      if (!state.imagePrompt.trim()) return;
-      // Removed Limit Check
-
-      setIsGeneratingImage(true);
-      try {
-          const base64Image = await generateAiImage(state.imagePrompt);
-          
-          setState(prev => ({ 
-              ...prev, 
-              generatedImage: base64Image
-          }));
-      } catch (e: any) {
-          setToolStatus("Error: " + e.message);
-          setTimeout(() => setToolStatus(null), 3000);
-      } finally {
-          setIsGeneratingImage(false);
-      }
-  };
-
-  const refs = { fileInput: fileInputRef, pdfToWord: pdfToWordInputRef, wordToPdf: wordToPdfInputRef, merge: mergeInputRef };
-  const handlers = { handleFileUpload, processFileTool, handleGeneratePPT, handleHumanize, handleGenerateImage, handleCloseImageModal };
 
   return (
-    <div className="min-h-screen text-gray-900 pb-10">
-      <Navbar view={state.view} onGoHome={handleGoHome} />
-      
-      <AnimatePresence mode="wait">
-        {state.isProcessing && <LoadingView key="loading" status={state.processingStatus} progress={state.processingProgress} />}
-        
-        {!state.isProcessing && state.view === 'home' && (
-          <motion.div key="home" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
-            <HomeView 
-              state={state} 
-              setState={setState} 
-              refs={refs} 
-              handlers={handlers}
-              toolStatus={toolStatus}
-              isHumanizing={isHumanizing}
-              isGeneratingImage={isGeneratingImage}
-            />
-          </motion.div>
-        )}
-        
-        {!state.isProcessing && state.view === 'dashboard' && (
-          <motion.div key="dash" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
-            <DashboardView state={state} setState={setState} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="min-h-screen text-white bg-black font-sans selection:bg-red-500/30">
+      <Scene3D isIntro={true} />
 
-      <footer className="fixed bottom-0 w-full text-center py-3 text-xs font-medium text-gray-400 bg-white/70 backdrop-blur-md border-t border-white/50 z-40">
-        QuickRead • Instant Document AI
-      </footer>
+      <div className="relative z-10 pointer-events-none">
+        <Navbar currentPage={state.currentPage} onNavigate={handleNavigate} />
+
+        <AnimatePresence mode="wait">
+          {state.isProcessing && <TelemetryLoading key="loading" status={state.processingStatus} progress={state.processingProgress} />}
+
+          {!state.isProcessing && state.currentPage === 'home' && (
+            <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, filter: "blur(10px)" }} className="pointer-events-auto">
+              <HomePage state={state} fileInputRef={fileInputRef} handleFileUpload={handleFileUpload} onNavigate={handleNavigate} onSearch={handleSearch} />
+            </motion.div>
+          )}
+
+          {!state.isProcessing && state.currentPage === 'document-analyzer' && (
+            <motion.div key="analyzer" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="pointer-events-auto h-screen">
+              <DocumentAnalyzerPage state={state} setState={setState} fileInputRef={fileInputRef} handleFileUpload={handleFileUpload} />
+            </motion.div>
+          )}
+
+          {!state.isProcessing && state.currentPage === 'search-chat' && (
+            <motion.div key="search-chat" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="pointer-events-auto h-screen">
+              <SearchChatPage state={state} setState={setState} onBackToHome={() => handleNavigate('home')} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <FloatingBot />
+
+      {/* Credits Info Button */}
+      <div className="fixed bottom-6 left-6 z-[120] pointer-events-auto group">
+        <motion.div
+          whileHover={{ scale: 1.1 }}
+          className="w-10 h-10 bg-black/40 backdrop-blur-md border border-red-500/30 rounded-full flex items-center justify-center cursor-help transition-colors group-hover:bg-red-600/20 group-hover:border-red-500"
+        >
+          <div className="font-serif italic text-red-500 font-bold text-lg select-none">i</div>
+        </motion.div>
+
+        {/* Tooltip */}
+        <div className="absolute bottom-full left-0 mb-4 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <div className="bg-black/80 backdrop-blur-xl border border-red-500/30 px-4 py-2 rounded-lg whitespace-nowrap shadow-[0_0_20px_rgba(255,0,0,0.1)]">
+            <p className="text-[10px] font-mono text-red-500 uppercase tracking-[0.2em] mb-0.5 opacity-60">Authentication Credits</p>
+            <p className="text-sm font-bold italic tracking-wider text-white">FrontEnd Web Development Project
+              <br />Made By Batman & Team..! 🏎️</p>
+          </div>
+          {/* Tooltip Arrow */}
+          <div className="w-2 h-2 bg-black border-r border-b border-red-500/30 rotate-45 ml-4 -mt-1" />
+        </div>
+      </div>
     </div>
   );
 };
