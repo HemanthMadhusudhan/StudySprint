@@ -31,3 +31,5 @@ yarn-error.log*
 # OS
 Thumbs.db
 .DS_Store
+
+Use valid API keys to get Outputs
